@@ -122,6 +122,53 @@ app.get('/api/customers/:customerId/transactions', async (req, res) => {
   }
 });
 
+// GET: Fetch single transaction details
+app.get('/api/customers/:customerId/transactions/:transactionId', async (req, res) => {
+  try {
+    const { customerId, transactionId } = req.params;
+
+    // Verify customer exists
+    const customerDoc = await db.collection('customers').doc(customerId).get();
+    if (!customerDoc.exists) {
+      return res.status(404).json({ error: 'Customer not found' });
+    }
+
+    // Fetch single transaction
+    const transactionDoc = await db.collection('customers')
+      .doc(customerId)
+      .collection('transactions')
+      .doc(transactionId)
+      .get();
+
+    if (!transactionDoc.exists) {
+      return res.status(404).json({ error: 'Transaction not found' });
+    }
+
+    const transactionData = transactionDoc.data();
+
+    res.status(200).json({
+      success: true,
+      customerId,
+      data: {
+        id: transactionId,
+        ...transactionData,
+        // Additional computed fields
+        dateFormatted: new Date(transactionData.date).toLocaleDateString('en-IN', {
+          year: 'numeric',
+          month: 'short',
+          day: 'numeric'
+        }),
+        timeFormatted: new Date(transactionData.date).toLocaleTimeString('en-IN', {
+          hour: '2-digit',
+          minute: '2-digit'
+        })
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // POST: Generate and download statement (Returns PDF directly)
 app.post('/api/customers/:customerId/statement', async (req, res) => {
   try {
@@ -214,7 +261,188 @@ app.post('/api/customers/:customerId/statement', async (req, res) => {
   }
 });
 
-// GET: Fetch statement history (metadata only)
+// GET: Generate temporary download link for statement
+app.get('/api/customers/:customerId/statement-link', async (req, res) => {
+  try {
+    const { customerId } = req.params;
+    const { period = 'month', fromDate, toDate } = req.query;
+
+    // Verify customer exists
+    const customerDoc = await db.collection('customers').doc(customerId).get();
+    if (!customerDoc.exists) {
+      return res.status(404).json({ error: 'Customer not found' });
+    }
+
+    // Create filename format: statement_CUSTOMERID_TIMESTAMP.pdf
+    const moment = require('moment');
+    const timestamp = moment().format('YYYYMMDD_HHmmss');
+    const filename = `statement_${customerId}_${timestamp}.pdf`;
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours from now
+
+    // Store link metadata in temporary collection (filename as doc ID)
+    await db.collection('statement_links').doc(filename).set({
+      customerId: customerId,
+      filename: filename,
+      period: period || 'month',
+      fromDate: fromDate || null,
+      toDate: toDate || null,
+      createdAt: admin.firestore.Timestamp.now(),
+      expiresAt: expiresAt,
+      downloads: 0
+    });
+
+    // Generate download link with filename
+    const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
+    const downloadLink = `${baseUrl}/api/statement/download/${filename}`;
+
+    res.status(200).json({
+      success: true,
+      data: {
+        customerId: customerId,
+        filename: filename,
+        downloadLink: downloadLink,
+        period: period || 'month',
+        expiresAt: expiresAt.toISOString(),
+        expiresIn: '24 hours',
+        instructions: 'Share this link or click to download PDF. Link expires in 24 hours.'
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET: Download statement using filename (e.g., statement_01009_20240110_143022.pdf)
+app.get('/api/statement/download/:filename', async (req, res) => {
+  try {
+    const { filename } = req.params;
+
+    // Verify filename format and extract customer ID
+    const filenameRegex = /^statement_(\d+)_(\d{8}_\d{6})\.pdf$/;
+    const match = filename.match(filenameRegex);
+    
+    if (!match) {
+      return res.status(400).json({ error: 'Invalid filename format' });
+    }
+
+    const customerId = match[1];
+
+    // Verify link exists and is not expired
+    const linkDoc = await db.collection('statement_links').doc(filename).get();
+    if (!linkDoc.exists) {
+      return res.status(404).json({ error: 'Download link not found or expired' });
+    }
+
+    const linkData = linkDoc.data();
+    const now = new Date();
+    const expiresAt = new Date(linkData.expiresAt);
+
+    if (now > expiresAt) {
+      // Delete expired link
+      await db.collection('statement_links').doc(filename).delete();
+      return res.status(410).json({ error: 'Download link has expired' });
+    }
+
+    // Verify customer ID matches
+    if (linkData.customerId !== customerId) {
+      return res.status(403).json({ error: 'Unauthorized access' });
+    }
+
+    const { period, fromDate, toDate } = linkData;
+
+    // Get customer
+    const customerDoc = await db.collection('customers').doc(customerId).get();
+    if (!customerDoc.exists) {
+      return res.status(404).json({ error: 'Customer not found' });
+    }
+
+    const customerData = customerDoc.data();
+
+    // Calculate date range
+    const moment = require('moment');
+    let from, to;
+
+    if (fromDate && toDate) {
+      from = moment(fromDate);
+      to = moment(toDate);
+    } else {
+      to = moment();
+      switch (period) {
+        case '15days':
+          from = to.clone().subtract(15, 'days');
+          break;
+        case '3months':
+          from = to.clone().subtract(3, 'months');
+          break;
+        case '6months':
+          from = to.clone().subtract(6, 'months');
+          break;
+        case 'year':
+          from = to.clone().subtract(1, 'year');
+          break;
+        case 'month':
+        default:
+          from = to.clone().subtract(1, 'month');
+          break;
+      }
+    }
+
+    // Fetch transactions in date range
+    const snapshot = await db.collection('customers')
+      .doc(customerId)
+      .collection('transactions')
+      .where('date', '>=', from.toDate())
+      .where('date', '<=', to.toDate())
+      .orderBy('date', 'desc')
+      .get();
+
+    const transactions = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+
+    // Generate PDF in memory
+    const pdfBuffer = await generatePDFStatement({
+      customer: customerData,
+      customerId,
+      transactions,
+      fromDate: from,
+      toDate: to
+    });
+
+    // Increment download counter
+    await db.collection('statement_links').doc(filename).update({
+      downloads: linkData.downloads + 1,
+      lastDownloadAt: admin.firestore.Timestamp.now()
+    });
+
+    // Save record to statement history
+    await db.collection('customers')
+      .doc(customerId)
+      .collection('statement_history')
+      .add({
+        filename,
+        period,
+        fromDate: from.toDate(),
+        toDate: to.toDate(),
+        transactionCount: transactions.length,
+        downloadedAt: admin.firestore.Timestamp.now(),
+        downloadedVia: 'temporary_link'
+      });
+
+    // Return PDF directly with filename
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Length', pdfBuffer.length);
+    
+    res.status(200).send(pdfBuffer);
+  } catch (error) {
+    console.error('Statement download error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET: Fetch statement history
 app.get('/api/customers/:customerId/statement-history', async (req, res) => {
   try {
     const { customerId } = req.params;
@@ -223,7 +451,7 @@ app.get('/api/customers/:customerId/statement-history', async (req, res) => {
     const snapshot = await db.collection('customers')
       .doc(customerId)
       .collection('statement_history')
-      .orderBy('generatedAt', 'desc')
+      .orderBy('downloadedAt', 'desc')
       .limit(parseInt(limit))
       .get();
 
@@ -234,8 +462,8 @@ app.get('/api/customers/:customerId/statement-history', async (req, res) => {
       fromDate: doc.data().fromDate?.toDate(),
       toDate: doc.data().toDate?.toDate(),
       transactionCount: doc.data().transactionCount,
-      generatedAt: doc.data().generatedAt?.toDate(),
-      downloadEndpoint: `/api/customers/${customerId}/statement-history/${doc.id}/download`
+      downloadedAt: doc.data().downloadedAt?.toDate() || doc.data().generatedAt?.toDate(),
+      downloadedVia: doc.data().downloadedVia || 'direct'
     }));
 
     res.status(200).json({
