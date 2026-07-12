@@ -11,11 +11,6 @@
       "src": "/(.*)",
       "dest": "index.js"
     }
-  ],
-  "env": {
-    "FIREBASE_SERVICE_ACCOUNT_KEY": "@firebase_service_account_key",
-    "FIREBASE_DATABASE_URL": "@firebase_database_url",
-    "FIREBASE_STORAGE_BUCKET": "@firebase_storage_bucket",
-    "NODE_ENV": "production"
-  }
+  ]
+  
 }
