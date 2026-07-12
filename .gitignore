@@ -9,6 +9,7 @@ pnpm-debug.log*
 .env
 .env.local
 .env.*.local
+.env.example
 
 # Firebase
 firebase-debug.log
@@ -47,3 +48,5 @@ coverage/
 # Misc
 *.bak
 *.orig
+
+.vercel
