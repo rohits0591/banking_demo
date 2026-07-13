@@ -106,10 +106,33 @@ app.get('/api/customers/:customerId/transactions', async (req, res) => {
       .offset(parseInt(offset))
       .get();
 
-    const transactions = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    }));
+    const moment = require('moment');
+
+    const transactions = snapshot.docs.map(doc => {
+      const data = doc.data();
+      
+      // Convert Firebase timestamp to proper date/time
+      let transactionDate;
+      if (data.date.toDate) {
+        transactionDate = data.date.toDate();
+      } else if (data.date instanceof Date) {
+        transactionDate = data.date;
+      } else {
+        transactionDate = new Date(data.date);
+      }
+
+      return {
+        id: doc.id,
+        type: data.type,
+        amount: data.amount,
+        date: transactionDate.toISOString(),
+        dateFormatted: moment(transactionDate).format('DD/MM/YYYY'),
+        timeFormatted: moment(transactionDate).format('HH:mm:ss'),
+        status: data.status,
+        description: data.description,
+        reference: data.reference
+      };
+    });
 
     res.status(200).json({
       success: true,
@@ -145,23 +168,106 @@ app.get('/api/customers/:customerId/transactions/:transactionId', async (req, re
     }
 
     const transactionData = transactionDoc.data();
+    const moment = require('moment');
+    
+    // Convert Firebase timestamp to proper date/time
+    let transactionDate;
+    if (transactionData.date.toDate) {
+      // Firebase Timestamp object
+      transactionDate = transactionData.date.toDate();
+    } else if (transactionData.date instanceof Date) {
+      // Already a Date object
+      transactionDate = transactionData.date;
+    } else {
+      // Fallback
+      transactionDate = new Date(transactionData.date);
+    }
+
+    // Format dates properly
+    const dateFormatted = moment(transactionDate).format('DD/MM/YYYY');
+    const timeFormatted = moment(transactionDate).format('HH:mm:ss');
 
     res.status(200).json({
       success: true,
       customerId,
       data: {
         id: transactionId,
-        ...transactionData,
-        // Additional computed fields
-        dateFormatted: new Date(transactionData.date).toLocaleDateString('en-IN', {
-          year: 'numeric',
-          month: 'short',
-          day: 'numeric'
-        }),
-        timeFormatted: new Date(transactionData.date).toLocaleTimeString('en-IN', {
-          hour: '2-digit',
-          minute: '2-digit'
-        })
+        type: transactionData.type,
+        amount: transactionData.amount,
+        date: transactionDate.toISOString(),
+        dateFormatted: dateFormatted,
+        timeFormatted: timeFormatted,
+        status: transactionData.status,
+        description: transactionData.description,
+        reference: transactionData.reference,
+        category: transactionData.category,
+        balance: transactionData.balance
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET: Fetch latest transaction for a customer ⭐ NEW
+app.get('/api/customers/:customerId/transactions/latest', async (req, res) => {
+  try {
+    const { customerId } = req.params;
+
+    // Verify customer exists
+    const customerDoc = await db.collection('customers').doc(customerId).get();
+    if (!customerDoc.exists) {
+      return res.status(404).json({ error: 'Customer not found' });
+    }
+
+    // Fetch latest transaction (ordered by date, descending, limit 1)
+    const snapshot = await db.collection('customers')
+      .doc(customerId)
+      .collection('transactions')
+      .orderBy('date', 'desc')
+      .limit(1)
+      .get();
+
+    if (snapshot.empty) {
+      return res.status(404).json({ error: 'No transactions found' });
+    }
+
+    const transactionDoc = snapshot.docs[0];
+    const transactionData = transactionDoc.data();
+    const moment = require('moment');
+
+    // Convert Firebase timestamp to proper date/time
+    let transactionDate;
+    if (transactionData.date.toDate) {
+      // Firebase Timestamp object
+      transactionDate = transactionData.date.toDate();
+    } else if (transactionData.date instanceof Date) {
+      // Already a Date object
+      transactionDate = transactionData.date;
+    } else {
+      // Fallback
+      transactionDate = new Date(transactionData.date);
+    }
+
+    // Format dates properly
+    const dateFormatted = moment(transactionDate).format('DD/MM/YYYY');
+    const timeFormatted = moment(transactionDate).format('HH:mm:ss');
+
+    res.status(200).json({
+      success: true,
+      customerId,
+      data: {
+        id: transactionDoc.id,
+        type: transactionData.type,
+        amount: transactionData.amount,
+        date: transactionDate.toISOString(),
+        dateFormatted: dateFormatted,
+        timeFormatted: timeFormatted,
+        status: transactionData.status,
+        description: transactionData.description,
+        reference: transactionData.reference,
+        category: transactionData.category,
+        balance: transactionData.balance
       }
     });
   } catch (error) {
