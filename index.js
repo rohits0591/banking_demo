@@ -223,7 +223,7 @@ app.get('/api/customers/:customerId/transactions/:transactionId', async (req, re
   }
 });
 
-// GET: Fetch latest transaction for a customer ⭐ NEW
+// GET: Fetch latest 3 transactions for a customer ⭐ UPDATED
 app.get('/api/customers/:customerId/transactions/latest', async (req, res) => {
   try {
     const { customerId } = req.params;
@@ -234,62 +234,118 @@ app.get('/api/customers/:customerId/transactions/latest', async (req, res) => {
       return res.status(404).json({ error: 'Customer not found' });
     }
 
-    // Fetch latest transaction (ordered by date, descending, limit 1)
+    // Fetch latest 3 transactions (ordered by date descending, limit 3)
     const snapshot = await db.collection('customers')
       .doc(customerId)
       .collection('transactions')
       .orderBy('date', 'desc')
-      .limit(1)
+      .limit(3)
       .get();
 
     if (snapshot.empty) {
       return res.status(404).json({ error: 'No transactions found' });
     }
 
-    const transactionDoc = snapshot.docs[0];
-    const transactionData = transactionDoc.data();
     const moment = require('moment');
+    
+    const transactions = snapshot.docs.map(transactionDoc => {
+      const data = transactionDoc.data();
 
-    // Convert Firebase timestamp to proper date/time
-    let transactionDate;
-    if (transactionData.date && transactionData.date._seconds !== undefined) {
-      // Firestore Timestamp with _seconds and _nanoseconds
-      transactionDate = new Date(transactionData.date._seconds * 1000);
-    } else if (transactionData.date && typeof transactionData.date.toDate === 'function') {
-      // Firebase Timestamp object with toDate() method
-      transactionDate = transactionData.date.toDate();
-    } else if (transactionData.date instanceof Date) {
-      // Already a Date object
-      transactionDate = transactionData.date;
-    } else {
-      // Fallback
-      transactionDate = new Date(transactionData.date);
-    }
+      // Convert Firebase timestamp to proper date/time
+      let transactionDate;
+      if (data.date && data.date._seconds !== undefined) {
+        // Firestore Timestamp with _seconds and _nanoseconds
+        transactionDate = new Date(data.date._seconds * 1000);
+      } else if (data.date && typeof data.date.toDate === 'function') {
+        // Firebase Timestamp object with toDate() method
+        transactionDate = data.date.toDate();
+      } else if (data.date instanceof Date) {
+        // Already a Date object
+        transactionDate = data.date;
+      } else {
+        // Fallback
+        transactionDate = new Date(data.date);
+      }
 
-    // Format dates properly
-    const dateFormatted = moment(transactionDate).format('DD/MM/YYYY');
-    const timeFormatted = moment(transactionDate).format('HH:mm:ss');
+      // Format dates properly
+      const dateFormatted = moment(transactionDate).format('DD/MM/YYYY');
+      const timeFormatted = moment(transactionDate).format('HH:mm:ss');
+
+      return {
+        id: transactionDoc.id,
+        transactionId: data.transactionId,
+        type: data.type,
+        amount: data.amount,
+        date: transactionDate.toISOString(),
+        dateFormatted: dateFormatted,
+        timeFormatted: timeFormatted,
+        status: data.status,
+        description: data.description,
+        merchant: data.merchant,
+        reference: data.reference,
+        category: data.category || 'general',
+        balance: data.balance
+      };
+    });
 
     res.status(200).json({
       success: true,
       customerId,
+      count: transactions.length,
+      data: transactions
+    });
+  } catch (error) {
+    console.error('Error fetching latest transactions:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// PUT: Update customer email ⭐ NEW
+app.put('/api/customers/:customerId/email', async (req, res) => {
+  try {
+    const { customerId } = req.params;
+    const { email } = req.body;
+
+    // Validate email is provided
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+
+    // Basic email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({ error: 'Invalid email format' });
+    }
+
+    // Verify customer exists
+    const customerDoc = await db.collection('customers').doc(customerId).get();
+    if (!customerDoc.exists) {
+      return res.status(404).json({ error: 'Customer not found' });
+    }
+
+    const customerData = customerDoc.data();
+    const oldEmail = customerData.email;
+
+    // Update customer email
+    await db.collection('customers').doc(customerId).update({
+      email: email,
+      updatedAt: new Date()
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Email updated successfully',
+      customerId,
       data: {
-        id: transactionDoc.id,
-        transactionId: transactionData.transactionId,
-        type: transactionData.type,
-        amount: transactionData.amount,
-        date: transactionDate.toISOString(),
-        dateFormatted: dateFormatted,
-        timeFormatted: timeFormatted,
-        status: transactionData.status,
-        description: transactionData.description,
-        merchant: transactionData.merchant,
-        reference: transactionData.reference,
-        category: transactionData.category || 'general',
-        balance: transactionData.balance
+        customerId,
+        name: customerData.name,
+        oldEmail: oldEmail,
+        newEmail: email,
+        updatedAt: new Date().toISOString()
       }
     });
   } catch (error) {
+    console.error('Error updating customer email:', error);
     res.status(500).json({ error: error.message });
   }
 });
