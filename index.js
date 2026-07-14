@@ -154,75 +154,7 @@ app.get('/api/customers/:customerId/transactions', async (req, res) => {
   }
 });
 
-// GET: Fetch single transaction details
-app.get('/api/customers/:customerId/transactions/:transactionId', async (req, res) => {
-  try {
-    const { customerId, transactionId } = req.params;
-
-    // Verify customer exists
-    const customerDoc = await db.collection('customers').doc(customerId).get();
-    if (!customerDoc.exists) {
-      return res.status(404).json({ error: 'Customer not found' });
-    }
-
-    // Fetch single transaction
-    const transactionDoc = await db.collection('customers')
-      .doc(customerId)
-      .collection('transactions')
-      .doc(transactionId)
-      .get();
-
-    if (!transactionDoc.exists) {
-      return res.status(404).json({ error: 'Transaction not found' });
-    }
-
-    const transactionData = transactionDoc.data();
-    const moment = require('moment');
-    
-    // Convert Firebase timestamp to proper date/time
-    let transactionDate;
-    if (transactionData.date && transactionData.date._seconds !== undefined) {
-      // Firestore Timestamp with _seconds and _nanoseconds
-      transactionDate = new Date(transactionData.date._seconds * 1000);
-    } else if (transactionData.date && typeof transactionData.date.toDate === 'function') {
-      // Firebase Timestamp object with toDate() method
-      transactionDate = transactionData.date.toDate();
-    } else if (transactionData.date instanceof Date) {
-      // Already a Date object
-      transactionDate = transactionData.date;
-    } else {
-      // Fallback
-      transactionDate = new Date(transactionData.date);
-    }
-
-    // Format dates properly
-    const dateFormatted = moment(transactionDate).format('DD/MM/YYYY');
-    const timeFormatted = moment(transactionDate).format('HH:mm:ss');
-
-    res.status(200).json({
-      success: true,
-      customerId,
-      data: {
-        id: transactionId,
-        transactionId: transactionData.transactionId,
-        type: transactionData.type,
-        amount: transactionData.amount,
-        date: transactionDate.toISOString(),
-        dateFormatted: dateFormatted,
-        timeFormatted: timeFormatted,
-        status: transactionData.status,
-        description: transactionData.description,
-        merchant: transactionData.merchant,
-        reference: transactionData.reference,
-        category: transactionData.category || 'general',
-        balance: transactionData.balance
-      }
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
+// ⭐ IMPORTANT: This must come BEFORE the :transactionId route!
 // GET: Fetch latest 3 transactions for a customer ⭐ UPDATED
 app.get('/api/customers/:customerId/transactions/latest', async (req, res) => {
   try {
@@ -296,6 +228,76 @@ app.get('/api/customers/:customerId/transactions/latest', async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching latest transactions:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET: Fetch single transaction details
+// ⭐ This comes AFTER /latest to avoid matching "latest" as a transaction ID
+app.get('/api/customers/:customerId/transactions/:transactionId', async (req, res) => {
+  try {
+    const { customerId, transactionId } = req.params;
+
+    // Verify customer exists
+    const customerDoc = await db.collection('customers').doc(customerId).get();
+    if (!customerDoc.exists) {
+      return res.status(404).json({ error: 'Customer not found' });
+    }
+
+    // Fetch single transaction
+    const transactionDoc = await db.collection('customers')
+      .doc(customerId)
+      .collection('transactions')
+      .doc(transactionId)
+      .get();
+
+    if (!transactionDoc.exists) {
+      return res.status(404).json({ error: 'Transaction not found' });
+    }
+
+    const transactionData = transactionDoc.data();
+    const moment = require('moment');
+    
+    // Convert Firebase timestamp to proper date/time
+    let transactionDate;
+    if (transactionData.date && transactionData.date._seconds !== undefined) {
+      // Firestore Timestamp with _seconds and _nanoseconds
+      transactionDate = new Date(transactionData.date._seconds * 1000);
+    } else if (transactionData.date && typeof transactionData.date.toDate === 'function') {
+      // Firebase Timestamp object with toDate() method
+      transactionDate = transactionData.date.toDate();
+    } else if (transactionData.date instanceof Date) {
+      // Already a Date object
+      transactionDate = transactionData.date;
+    } else {
+      // Fallback
+      transactionDate = new Date(transactionData.date);
+    }
+
+    // Format dates properly
+    const dateFormatted = moment(transactionDate).format('DD/MM/YYYY');
+    const timeFormatted = moment(transactionDate).format('HH:mm:ss');
+
+    res.status(200).json({
+      success: true,
+      customerId,
+      data: {
+        id: transactionId,
+        transactionId: transactionData.transactionId,
+        type: transactionData.type,
+        amount: transactionData.amount,
+        date: transactionDate.toISOString(),
+        dateFormatted: dateFormatted,
+        timeFormatted: timeFormatted,
+        status: transactionData.status,
+        description: transactionData.description,
+        merchant: transactionData.merchant,
+        reference: transactionData.reference,
+        category: transactionData.category || 'general',
+        balance: transactionData.balance
+      }
+    });
+  } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
