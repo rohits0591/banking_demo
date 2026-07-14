@@ -113,16 +113,23 @@ app.get('/api/customers/:customerId/transactions', async (req, res) => {
       
       // Convert Firebase timestamp to proper date/time
       let transactionDate;
-      if (data.date.toDate) {
+      if (data.date && data.date._seconds !== undefined) {
+        // Firestore Timestamp with _seconds and _nanoseconds
+        transactionDate = new Date(data.date._seconds * 1000);
+      } else if (data.date && typeof data.date.toDate === 'function') {
+        // Firebase Timestamp object with toDate() method
         transactionDate = data.date.toDate();
       } else if (data.date instanceof Date) {
+        // Already a Date object
         transactionDate = data.date;
       } else {
+        // Fallback
         transactionDate = new Date(data.date);
       }
 
       return {
         id: doc.id,
+        transactionId: data.transactionId,
         type: data.type,
         amount: data.amount,
         date: transactionDate.toISOString(),
@@ -130,7 +137,9 @@ app.get('/api/customers/:customerId/transactions', async (req, res) => {
         timeFormatted: moment(transactionDate).format('HH:mm:ss'),
         status: data.status,
         description: data.description,
-        reference: data.reference
+        merchant: data.merchant,
+        reference: data.reference,
+        category: data.category || 'general'
       };
     });
 
@@ -172,8 +181,11 @@ app.get('/api/customers/:customerId/transactions/:transactionId', async (req, re
     
     // Convert Firebase timestamp to proper date/time
     let transactionDate;
-    if (transactionData.date.toDate) {
-      // Firebase Timestamp object
+    if (transactionData.date && transactionData.date._seconds !== undefined) {
+      // Firestore Timestamp with _seconds and _nanoseconds
+      transactionDate = new Date(transactionData.date._seconds * 1000);
+    } else if (transactionData.date && typeof transactionData.date.toDate === 'function') {
+      // Firebase Timestamp object with toDate() method
       transactionDate = transactionData.date.toDate();
     } else if (transactionData.date instanceof Date) {
       // Already a Date object
@@ -192,6 +204,7 @@ app.get('/api/customers/:customerId/transactions/:transactionId', async (req, re
       customerId,
       data: {
         id: transactionId,
+        transactionId: transactionData.transactionId,
         type: transactionData.type,
         amount: transactionData.amount,
         date: transactionDate.toISOString(),
@@ -199,8 +212,9 @@ app.get('/api/customers/:customerId/transactions/:transactionId', async (req, re
         timeFormatted: timeFormatted,
         status: transactionData.status,
         description: transactionData.description,
+        merchant: transactionData.merchant,
         reference: transactionData.reference,
-        category: transactionData.category,
+        category: transactionData.category || 'general',
         balance: transactionData.balance
       }
     });
@@ -238,8 +252,11 @@ app.get('/api/customers/:customerId/transactions/latest', async (req, res) => {
 
     // Convert Firebase timestamp to proper date/time
     let transactionDate;
-    if (transactionData.date.toDate) {
-      // Firebase Timestamp object
+    if (transactionData.date && transactionData.date._seconds !== undefined) {
+      // Firestore Timestamp with _seconds and _nanoseconds
+      transactionDate = new Date(transactionData.date._seconds * 1000);
+    } else if (transactionData.date && typeof transactionData.date.toDate === 'function') {
+      // Firebase Timestamp object with toDate() method
       transactionDate = transactionData.date.toDate();
     } else if (transactionData.date instanceof Date) {
       // Already a Date object
@@ -258,6 +275,7 @@ app.get('/api/customers/:customerId/transactions/latest', async (req, res) => {
       customerId,
       data: {
         id: transactionDoc.id,
+        transactionId: transactionData.transactionId,
         type: transactionData.type,
         amount: transactionData.amount,
         date: transactionDate.toISOString(),
@@ -265,8 +283,9 @@ app.get('/api/customers/:customerId/transactions/latest', async (req, res) => {
         timeFormatted: timeFormatted,
         status: transactionData.status,
         description: transactionData.description,
+        merchant: transactionData.merchant,
         reference: transactionData.reference,
-        category: transactionData.category,
+        category: transactionData.category || 'general',
         balance: transactionData.balance
       }
     });
@@ -656,6 +675,22 @@ app.get('/api/customers/:customerId/summary', async (req, res) => {
       .filter(t => t.type === 'credit')
       .reduce((sum, t) => sum + t.amount, 0);
 
+    // Format last transaction date
+    let lastTransactionDate = null;
+    if (transactions[0]) {
+      if (transactions[0].date && transactions[0].date._seconds !== undefined) {
+        lastTransactionDate = new Date(transactions[0].date._seconds * 1000);
+      } else if (transactions[0].date && typeof transactions[0].date.toDate === 'function') {
+        lastTransactionDate = transactions[0].date.toDate();
+      } else if (transactions[0].date instanceof Date) {
+        lastTransactionDate = transactions[0].date;
+      } else {
+        lastTransactionDate = new Date(transactions[0].date);
+      }
+    }
+
+    const moment = require('moment');
+
     res.status(200).json({
       success: true,
       data: {
@@ -666,7 +701,9 @@ app.get('/api/customers/:customerId/summary', async (req, res) => {
         accountStatus: customer.accountStatus,
         customerType: customer.customerType,
         currentBalance: customer.balance,
-        lastTransactionDate: transactions[0]?.date?.toDate(),
+        lastTransactionDate: lastTransactionDate ? lastTransactionDate.toISOString() : null,
+        lastTransactionDateFormatted: lastTransactionDate ? moment(lastTransactionDate).format('DD/MM/YYYY') : null,
+        lastTransactionTimeFormatted: lastTransactionDate ? moment(lastTransactionDate).format('HH:mm:ss') : null,
         recentTransactions: transactions,
         statistics: {
           totalTransactions: allTransactions.length,
