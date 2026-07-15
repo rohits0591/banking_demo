@@ -357,6 +357,8 @@ app.post('/api/customers/:customerId/statement', async (req, res) => {
   try {
     const { customerId } = req.params;
     const { period = 'month', fromDate, toDate } = req.body;
+    // format=base64 (via body or query) returns JSON base64 for email attachment nodes
+    const format = req.body.format || req.query.format;
 
     // Verify customer exists
     const customerDoc = await db.collection('customers').doc(customerId).get();
@@ -432,7 +434,21 @@ app.post('/api/customers/:customerId/statement', async (req, res) => {
         generatedAt: admin.firestore.Timestamp.now()
       });
 
-    // Return PDF directly as downloadable file
+    // If base64 requested (e.g. WebexCC email node), return JSON instead of binary
+    if (format === 'base64') {
+      const base64Pdf = pdfBuffer.toString('base64');
+      return res.status(200).json({
+        success: true,
+        customerId,
+        filename,
+        mimeType: 'application/pdf',
+        base64: base64Pdf,
+        dataUri: `data:application/pdf;base64,${base64Pdf}`,
+        sizeBytes: pdfBuffer.length
+      });
+    }
+
+    // Default: return PDF directly as downloadable file (used by WhatsApp)
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.setHeader('Content-Length', pdfBuffer.length);
@@ -483,11 +499,16 @@ app.get('/api/customers/:customerId/statement-link', async (req, res) => {
       data: {
         customerId: customerId,
         filename: filename,
+        // Both links return the same clean binary PDF (Content-Type: application/pdf).
+        // WebexCC fetches either URL and attaches the file directly.
+        whatsappDownloadLink: downloadLink,
+        emailDownloadLink: downloadLink,
+        // Kept for backward compatibility with existing flows
         downloadLink: downloadLink,
         period: period || 'month',
         expiresAt: expiresAt.toISOString(),
         expiresIn: '24 hours',
-        instructions: 'Share this link or click to download PDF. Link expires in 24 hours.'
+        instructions: 'Use whatsappDownloadLink for WhatsApp and emailDownloadLink for email. Both return the PDF as binary and can be fetched and attached directly. Links expire in 24 hours.'
       }
     });
   } catch (error) {
@@ -613,12 +634,29 @@ app.get('/api/statement/download/:filename', async (req, res) => {
         downloadedVia: 'temporary_link'
       });
 
-    // Return PDF directly with filename
+    // If base64 requested (e.g. WebexCC email node), return JSON instead of binary
+    if (req.query.format === 'base64') {
+      const base64Pdf = pdfBuffer.toString('base64');
+      return res.status(200).json({
+        success: true,
+        customerId,
+        filename,
+        mimeType: 'application/pdf',
+        base64: base64Pdf,
+        dataUri: `data:application/pdf;base64,${base64Pdf}`,
+        sizeBytes: pdfBuffer.length
+      });
+    }
+
+    // Default: return PDF directly with filename (used by WhatsApp and email fetch-and-attach)
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Transfer-Encoding', 'binary');
     res.setHeader('Content-Length', pdfBuffer.length);
-    
-    res.status(200).send(pdfBuffer);
+    res.setHeader('Cache-Control', 'no-store');
+
+    // Send as a Buffer so no text/UTF-8 re-encoding can corrupt the bytes
+    res.status(200).end(Buffer.from(pdfBuffer), 'binary');
   } catch (error) {
     console.error('Statement download error:', error);
     res.status(500).json({ error: error.message });

@@ -14,20 +14,20 @@ async function generatePDFStatement({ customer, customerId, transactions, fromDa
       doc.on('data', chunk => chunks.push(chunk));
       doc.on('end', () => resolve(Buffer.concat(chunks)));
 
-      // Header with bank branding
-      const bankName = 'SIMPLECITY BANK';
-      const bankTagline = 'Your Trusted Banking Partner';
+      // Header with bank branding - AU Small Finance Bank
+      const bankName = 'AU SMALL FINANCE BANK';
+      const bankTagline = 'Sar Badlega India';
 
-      // Top banner background
-      doc.rect(0, 0, doc.page.width, 80).fill('#1F4788');
+      // Top banner background (AU SFB Brand Color - Dark Blue)
+      doc.rect(0, 0, doc.page.width, 80).fill('#003366');
       
       // Bank name and tagline
       doc.fillColor('#FFFFFF');
-      doc.fontSize(24).font('Helvetica-Bold').text(bankName, 50, 20);
-      doc.fontSize(10).font('Helvetica').text(bankTagline, 50, 48);
+      doc.fontSize(24).font('Helvetica-Bold').text(bankName, 50, 18);
+      doc.fontSize(11).font('Helvetica-Oblique').text(bankTagline, 50, 45);
       
       // Contact info in header
-      doc.fontSize(8).text('Customer Support: 1-800-BANK-123 | Email: support@simplecitybank.com', 50, 60);
+      doc.fontSize(8).text('Customer Support: 1-800-AU-BANK | Email: support@aubank.in | Website: www.aubank.in', 50, 62);
 
       // Reset color and spacing
       doc.fillColor('#000000');
@@ -78,7 +78,7 @@ async function generatePDFStatement({ customer, customerId, transactions, fromDa
       const colWidths = [70, 100, 100, 70, 80, 50];
       let currentX = 50;
 
-      doc.rect(50, tableTop - 5, doc.page.width - 100, 20).fill('#1F4788');
+      doc.rect(50, tableTop - 5, doc.page.width - 100, 20).fill('#003366');
       doc.fillColor('#FFFFFF');
       doc.fontSize(8).font('Helvetica-Bold');
 
@@ -138,10 +138,10 @@ async function generatePDFStatement({ customer, customerId, transactions, fromDa
       doc.text('2. Please verify all transactions and report discrepancies within 30 days.', 50, doc.page.height - 45);
       doc.text('3. This statement is confidential and intended for the account holder only.', 50, doc.page.height - 35);
       
-      // Bank details at bottom
+      // Bank details at bottom - AU Small Finance Bank
       doc.fontSize(7).font('Helvetica-Bold');
-      doc.text(`${bankName} | Registered Office: 123 Banking Street, Mumbai, India`, 50, doc.page.height - 20, { align: 'left' });
-      doc.text(`GSTIN: 07AABCT1234K1ZA | CIN: U65999MH2020PTC341234`, 50, doc.page.height - 12, { align: 'left' });
+      doc.text(`${bankName} | Registered Office: AU Tower, Lodhi Road, New Delhi - 110003, India`, 50, doc.page.height - 20, { align: 'left' });
+      doc.text(`GSTIN: 07AAACR5073K1Z0 | CIN: U65990DL2009PLC184649 | IFSC: AUBL`, 50, doc.page.height - 12, { align: 'left' });
 
       doc.end();
     } catch (error) {
